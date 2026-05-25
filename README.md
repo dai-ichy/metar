@@ -61,7 +61,7 @@ By default the app listens on all interfaces (`0.0.0.0`) on port 5000. To change
 The test suite requires no extra dependencies and runs entirely offline using mock METAR strings.
 
 ```bash
-python -m unittest test_app -v
+python3 -m unittest test_app -v
 ```
 
 46 tests cover the weather token decoder and the METAR parser across seven scenarios: clear, rain, thunderstorm, snow, fog, calm wind, and CAVOK.
