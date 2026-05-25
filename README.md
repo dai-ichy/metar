@@ -56,6 +56,16 @@ By default the app listens on all interfaces (`0.0.0.0`) on port 5000. To change
 
 > **ICAO vs IATA codes** — Most airports have a 4-letter ICAO code (e.g. `KLAX`). Some US airports are commonly known by their 3-letter IATA code (e.g. `LAX`); the app accepts both, but ICAO codes are preferred and more reliable.
 
+## Running the tests
+
+The test suite requires no extra dependencies and runs entirely offline using mock METAR strings.
+
+```bash
+python -m unittest test_app -v
+```
+
+46 tests cover the weather token decoder and the METAR parser across seven scenarios: clear, rain, thunderstorm, snow, fog, calm wind, and CAVOK.
+
 ## Project structure
 
 ```
