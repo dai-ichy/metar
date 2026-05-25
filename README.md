@@ -23,8 +23,8 @@ A Flask web app that translates raw METAR aviation weather reports into plain En
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/your-username/metar-app.git
-cd metar-app
+git clone https://github.com/dai-ichy/metar.git
+cd metar
 
 # 2. Create and activate a virtual environment (recommended)
 python -m venv .venv
