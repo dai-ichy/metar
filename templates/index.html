@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>METAR Reader — Airport Weather in Plain English</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+      min-height: 100vh;
+      color: #e0e0e0;
+      padding: 2rem 1rem;
+    }
+
+    .container {
+      max-width: 760px;
+      margin: 0 auto;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 2.5rem;
+    }
+
+    header h1 {
+      font-size: 2.4rem;
+      font-weight: 800;
+      color: #ffffff;
+      letter-spacing: -0.5px;
+    }
+
+    header p {
+      color: #8899bb;
+      margin-top: 0.4rem;
+      font-size: 1.05rem;
+    }
+
+    /* Search card */
+    .search-card {
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 16px;
+      padding: 2rem;
+      margin-bottom: 2rem;
+      backdrop-filter: blur(10px);
+    }
+
+    .search-row {
+      display: flex;
+      gap: 0.75rem;
+      align-items: stretch;
+    }
+
+    .search-row input {
+      flex: 1;
+      padding: 0.85rem 1.1rem;
+      font-size: 1.15rem;
+      font-weight: 600;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      background: rgba(255,255,255,0.08);
+      border: 1.5px solid rgba(255,255,255,0.15);
+      border-radius: 10px;
+      color: #fff;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .search-row input::placeholder {
+      color: #556688;
+      font-weight: 400;
+      letter-spacing: 1px;
+    }
+
+    .search-row input:focus {
+      border-color: #4d9fff;
+    }
+
+    .search-row button {
+      padding: 0.85rem 1.6rem;
+      background: #4d9fff;
+      color: #fff;
+      font-size: 1rem;
+      font-weight: 700;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background 0.2s, transform 0.1s;
+      white-space: nowrap;
+    }
+
+    .search-row button:hover { background: #2d84e0; }
+    .search-row button:active { transform: scale(0.97); }
+
+    .hint {
+      margin-top: 0.8rem;
+      font-size: 0.85rem;
+      color: #6677aa;
+    }
+
+    .examples span {
+      display: inline-block;
+      background: rgba(77,159,255,0.12);
+      border: 1px solid rgba(77,159,255,0.25);
+      color: #7ab5ff;
+      border-radius: 6px;
+      padding: 0.2rem 0.5rem;
+      font-size: 0.78rem;
+      font-weight: 600;
+      letter-spacing: 1px;
+      margin: 0.2rem 0.2rem 0 0;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .examples span:hover { background: rgba(77,159,255,0.22); }
+
+    /* Error */
+    .error-box {
+      background: rgba(255, 80, 80, 0.12);
+      border: 1px solid rgba(255, 80, 80, 0.3);
+      color: #ff9999;
+      border-radius: 12px;
+      padding: 1rem 1.2rem;
+      margin-bottom: 2rem;
+      font-size: 0.95rem;
+    }
+
+    /* Weather card */
+    .weather-card {
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 16px;
+      overflow: hidden;
+      backdrop-filter: blur(10px);
+    }
+
+    .weather-hero {
+      padding: 2rem 2rem 1.5rem;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+
+    .weather-hero-top {
+      display: flex;
+      align-items: flex-start;
+      gap: 1rem;
+    }
+
+    .weather-icon {
+      font-size: 3.5rem;
+      line-height: 1;
+    }
+
+    .weather-station {
+      font-size: 0.8rem;
+      font-weight: 700;
+      letter-spacing: 2px;
+      color: #6677aa;
+      text-transform: uppercase;
+      margin-bottom: 0.25rem;
+    }
+
+    .weather-overall {
+      font-size: 1.45rem;
+      font-weight: 700;
+      color: #ffffff;
+      line-height: 1.3;
+    }
+
+    .weather-time {
+      font-size: 0.82rem;
+      color: #6677aa;
+      margin-top: 0.3rem;
+    }
+
+    /* Details grid */
+    .details-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 0;
+    }
+
+    .detail-cell {
+      padding: 1.2rem 1.5rem;
+      border-right: 1px solid rgba(255,255,255,0.06);
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+
+    .detail-cell:last-child,
+    .detail-cell.full-width {
+      border-right: none;
+    }
+
+    .detail-cell.full-width {
+      grid-column: 1 / -1;
+    }
+
+    .detail-label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: #556688;
+      margin-bottom: 0.35rem;
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+
+    .detail-value {
+      font-size: 1rem;
+      font-weight: 600;
+      color: #ddeeff;
+      line-height: 1.4;
+    }
+
+    .detail-value.calm {
+      color: #aaccff;
+    }
+
+    /* Sky layers */
+    .sky-layer-list {
+      list-style: none;
+    }
+
+    .sky-layer-list li {
+      font-size: 0.95rem;
+      color: #ddeeff;
+      padding: 0.1rem 0;
+    }
+
+    .sky-layer-list li .layer-note {
+      font-size: 0.8rem;
+      color: #ffbb55;
+      margin-left: 0.4rem;
+    }
+
+    /* Weather phenomena pills */
+    .wx-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      margin-top: 0.2rem;
+    }
+
+    .wx-pill {
+      background: rgba(255, 170, 50, 0.15);
+      border: 1px solid rgba(255, 170, 50, 0.3);
+      color: #ffcc77;
+      border-radius: 20px;
+      padding: 0.2rem 0.65rem;
+      font-size: 0.83rem;
+      font-weight: 600;
+      text-transform: capitalize;
+    }
+
+    /* Raw METAR */
+    .raw-section {
+      border-top: 1px solid rgba(255,255,255,0.08);
+      padding: 1rem 1.5rem;
+    }
+
+    .raw-toggle {
+      background: none;
+      border: none;
+      color: #5577aa;
+      font-size: 0.82rem;
+      cursor: pointer;
+      padding: 0;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      text-decoration: underline;
+      text-underline-offset: 3px;
+    }
+
+    .raw-toggle:hover { color: #7799cc; }
+
+    .raw-metar {
+      display: none;
+      margin-top: 0.7rem;
+      font-family: 'Courier New', monospace;
+      font-size: 0.88rem;
+      color: #aabbcc;
+      background: rgba(0,0,0,0.25);
+      border-radius: 8px;
+      padding: 0.8rem 1rem;
+      word-break: break-all;
+    }
+
+    footer {
+      text-align: center;
+      color: #3a4a66;
+      font-size: 0.8rem;
+      margin-top: 2.5rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>✈️ METAR Reader</h1>
+      <p>Enter an airport code to get a plain-English weather report.</p>
+    </header>
+
+    <div class="search-card">
+      <form method="POST" action="/">
+        <div class="search-row">
+          <input
+            type="text"
+            name="airport_code"
+            placeholder="e.g. KHIO or KJFK"
+            value="{{ airport_code }}"
+            maxlength="4"
+            autocomplete="off"
+            autofocus
+            id="airport-input"
+          />
+          <button type="submit">Get Weather</button>
+        </div>
+      </form>
+      <div class="hint">
+        Use ICAO codes (4 letters preferred). Try:
+        <div class="examples" style="margin-top:0.4rem;">
+          <span onclick="fillCode('KHIO')">KHIO</span>
+          <span onclick="fillCode('KJFK')">KJFK</span>
+          <span onclick="fillCode('KLAX')">KLAX</span>
+          <span onclick="fillCode('KORD')">KORD</span>
+          <span onclick="fillCode('EGLL')">EGLL</span>
+          <span onclick="fillCode('RJTT')">RJTT</span>
+        </div>
+      </div>
+    </div>
+
+    {% if error %}
+    <div class="error-box">⚠️ {{ error }}</div>
+    {% endif %}
+
+    {% if weather %}
+    <div class="weather-card">
+
+      <div class="weather-hero">
+        <div class="weather-hero-top">
+          <div class="weather-icon">{{ weather.icon }}</div>
+          <div>
+            <div class="weather-station">{{ weather.station }}</div>
+            <div class="weather-overall">{{ weather.overall }}</div>
+            {% if weather.time_utc %}
+            <div class="weather-time">Reported at {{ weather.time_utc }}</div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
+      <div class="details-grid">
+
+        <!-- Temperature -->
+        <div class="detail-cell">
+          <div class="detail-label">🌡️ Temperature</div>
+          {% if weather.temperature_f is not none %}
+          <div class="detail-value">{{ weather.temperature_f }}°F &nbsp;/&nbsp; {{ weather.temperature_c }}°C</div>
+          {% else %}
+          <div class="detail-value" style="color:#445566">Not reported</div>
+          {% endif %}
+        </div>
+
+        <!-- Dewpoint -->
+        <div class="detail-cell">
+          <div class="detail-label">💧 Dewpoint</div>
+          {% if weather.dewpoint_f is not none %}
+          <div class="detail-value">{{ weather.dewpoint_f }}°F &nbsp;/&nbsp; {{ weather.dewpoint_c }}°C</div>
+          {% else %}
+          <div class="detail-value" style="color:#445566">Not reported</div>
+          {% endif %}
+        </div>
+
+        <!-- Wind -->
+        <div class="detail-cell">
+          <div class="detail-label">💨 Wind</div>
+          <div class="detail-value {% if weather.wind_calm %}calm{% endif %}">
+            {{ weather.wind if weather.wind else 'Not reported' }}
+          </div>
+        </div>
+
+        <!-- Visibility -->
+        <div class="detail-cell">
+          <div class="detail-label">👁️ Visibility</div>
+          <div class="detail-value">{{ weather.visibility if weather.visibility else 'Not reported' }}</div>
+        </div>
+
+        <!-- Altimeter -->
+        <div class="detail-cell">
+          <div class="detail-label">📊 Pressure</div>
+          <div class="detail-value">{{ weather.altimeter if weather.altimeter else 'Not reported' }}</div>
+        </div>
+
+        <!-- Present weather (if any) -->
+        {% if weather.weather %}
+        <div class="detail-cell">
+          <div class="detail-label">🌦️ Conditions</div>
+          <div class="wx-pills">
+            {% for wx in weather.weather %}
+            <span class="wx-pill">{{ wx }}</span>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+
+        <!-- Sky / clouds (full width) -->
+        <div class="detail-cell full-width">
+          <div class="detail-label">☁️ Sky Conditions</div>
+          {% if weather.sky_layers %}
+          <ul class="sky-layer-list">
+            {% for layer in weather.sky_layers %}
+            <li>
+              {{ layer.coverage }}
+              {% if layer.height_ft is defined %}
+                at {{ '{:,}'.format(layer.height_ft) }} ft
+              {% endif %}
+              {% if layer.note is defined %}
+                <span class="layer-note">⚡ {{ layer.note }}</span>
+              {% endif %}
+            </li>
+            {% endfor %}
+          </ul>
+          {% else %}
+          <div class="detail-value" style="color:#445566">Not reported</div>
+          {% endif %}
+        </div>
+
+      </div><!-- /.details-grid -->
+
+      <div class="raw-section">
+        <button class="raw-toggle" onclick="toggleRaw()">Show raw METAR</button>
+        <div class="raw-metar" id="raw-metar">{{ weather.raw }}</div>
+      </div>
+
+    </div><!-- /.weather-card -->
+    {% endif %}
+
+    <footer>Data from aviationweather.gov &mdash; METAR Reader</footer>
+  </div>
+
+  <script>
+    function fillCode(code) {
+      document.getElementById('airport-input').value = code;
+      document.querySelector('form').submit();
+    }
+
+    function toggleRaw() {
+      const el = document.getElementById('raw-metar');
+      const btn = document.querySelector('.raw-toggle');
+      if (el.style.display === 'block') {
+        el.style.display = 'none';
+        btn.textContent = 'Show raw METAR';
+      } else {
+        el.style.display = 'block';
+        btn.textContent = 'Hide raw METAR';
+      }
+    }
+  </script>
+</body>
+</html>
