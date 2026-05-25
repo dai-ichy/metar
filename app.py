@@ -1,3 +1,8 @@
+"""
+Flask web app that fetches live METAR data from aviationweather.gov and
+decodes it into plain-English weather reports.
+"""
+
 from flask import Flask, render_template, request
 import requests
 import re
@@ -6,6 +11,14 @@ app = Flask(__name__)
 
 
 def wind_direction_name(degrees):
+    """Convert a wind direction in degrees to a compass direction name.
+
+    Args:
+        degrees: Integer wind direction (0–360).
+
+    Returns:
+        A string such as 'North', 'Southwest', 'East-Northeast', etc.
+    """
     dirs = [
         (11, 'North'), (34, 'North-Northeast'), (56, 'Northeast'),
         (79, 'East-Northeast'), (101, 'East'), (124, 'East-Southeast'),
@@ -21,13 +34,16 @@ def wind_direction_name(degrees):
 
 
 def c_to_f(c):
+    """Convert Celsius to Fahrenheit, rounded to the nearest integer."""
     return round(c * 9 / 5 + 32)
 
 
 def knots_to_mph(kt):
+    """Convert knots to miles per hour, rounded to the nearest integer."""
     return round(kt * 1.15078)
 
 
+# Human-readable labels for METAR present-weather codes (WMO Table 4678).
 WEATHER_DESC = {
     'DZ': 'drizzle', 'RA': 'rain', 'SN': 'snow', 'SG': 'snow grains',
     'IC': 'ice crystals', 'PL': 'ice pellets', 'GR': 'hail',
@@ -41,6 +57,7 @@ WEATHER_DESC = {
     'DR': 'drifting', 'BL': 'blowing',
 }
 
+# Sky-coverage labels and a numeric rank used to determine the "worst" layer.
 SKY_COVERAGE = {
     'CLR': ('Clear', 0),
     'SKC': ('Clear', 0),
@@ -55,6 +72,18 @@ SKY_COVERAGE = {
 
 
 def decode_weather_token(token):
+    """Decode a single METAR present-weather token into plain English.
+
+    Handles intensity prefixes (-, +, VC) and all two-letter phenomenon codes
+    defined in WEATHER_DESC.
+
+    Args:
+        token: A METAR weather token such as '-RA', '+TSRA', or 'VCFG'.
+
+    Returns:
+        A human-readable string (e.g. 'light rain', 'heavy thunderstorm rain'),
+        or None if no recognisable codes are found.
+    """
     intensity = ''
     rest = token
     if rest.startswith('VC'):
@@ -83,6 +112,8 @@ def decode_weather_token(token):
     return (intensity + ' '.join(parts)).strip() if parts else None
 
 
+# Matches valid present-weather tokens so non-weather tokens are not mistaken
+# for weather phenomena during sequential parsing.
 WEATHER_TOKEN_RE = re.compile(
     r'^([-+]|VC)?(MI|PR|BC|DR|BL|SH|TS|FZ)?'
     r'(DZ|RA|SN|SG|IC|PL|GR|GS|UP|BR|FG|FU|VA|DU|SA|HZ|PY|PO|SQ|FC|SS|DS|TS)+'
@@ -93,6 +124,23 @@ SKY_TOKEN_RE = re.compile(r'^(VV|CLR|SKC|NSC|NCD|FEW|SCT|BKN|OVC)(\d{3})?(CB|TCU
 
 
 def parse_metar(raw):
+    """Parse a raw METAR string into a structured dictionary.
+
+    Processes each field in order — station, timestamp, wind, visibility,
+    runway visual range (skipped), present weather, sky conditions,
+    temperature/dewpoint, and altimeter — then derives a plain-English
+    summary and an appropriate weather icon.
+
+    Args:
+        raw: The raw METAR string exactly as returned by the data source,
+             e.g. 'KHIO 211553Z 27008KT 10SM FEW050 18/07 A3002'.
+
+    Returns:
+        A dict with keys: raw, station, time_utc, wind, wind_calm,
+        visibility, weather (list), sky_layers (list), sky_summary,
+        temperature_c, temperature_f, dewpoint_c, dewpoint_f,
+        altimeter, icon, overall.
+    """
     tokens = raw.split()
     result = {
         'raw': raw,
@@ -127,17 +175,17 @@ def parse_metar(raw):
         result['station'] = tokens[idx]
         idx += 1
 
-    # Date/time
+    # Date/time (DDHHmmZ)
     if idx < len(tokens) and re.match(r'^\d{6}Z$', tokens[idx]):
         dt = tokens[idx]
         result['time_utc'] = f"{dt[2:4]}:{dt[4:6]} UTC (day {int(dt[:2])})"
         idx += 1
 
-    # AUTO / COR (may appear before OR after timestamp)
+    # AUTO / COR modifier — informational only, no data to extract
     while idx < len(tokens) and tokens[idx] in ('AUTO', 'COR', 'NIL'):
         idx += 1
 
-    # Wind
+    # Wind (e.g. 27008KT, VRB03KT, 24015G25KT)
     if idx < len(tokens):
         m = re.match(r'^(VRB|\d{3})(\d{2,3})(G(\d{2,3}))?(KT|MPS|KMH)$', tokens[idx])
         if m:
@@ -162,14 +210,14 @@ def parse_metar(raw):
                     result['wind'] += f", gusting to {gust_mph} mph"
             idx += 1
 
-    # Variable wind range (e.g. 270V360)
+    # Variable wind range (e.g. 270V360) — direction only, already captured above
     if idx < len(tokens) and re.match(r'^\d{3}V\d{3}$', tokens[idx]):
         idx += 1
 
-    # Visibility
+    # Visibility — handles SM fractions, CAVOK, and metric (4-digit) formats
     if idx < len(tokens):
         tok = tokens[idx]
-        # Check for fraction + SM on next token (e.g. "1 1/2SM")
+        # Whole-number prefix before a fractional SM token (e.g. "1 1/2SM")
         if re.match(r'^\d+$', tok) and idx + 1 < len(tokens) and re.match(r'^\d+/\d+SM$', tokens[idx + 1]):
             result['visibility'] = f"{tok} {tokens[idx+1].replace('SM', '')} statute miles"
             idx += 2
@@ -188,18 +236,18 @@ def parse_metar(raw):
             result['visibility'] = ('10+ km' if meters >= 9999 else f"{meters} meters ({round(meters / 1609.34, 1)} miles)")
             idx += 1
 
-    # RVR — skip
+    # RVR (Runway Visual Range) — skip; useful only to pilots, not end users
     while idx < len(tokens) and re.match(r'^R\d+[LCR]?/', tokens[idx]):
         idx += 1
 
-    # Present weather
+    # Present weather phenomena (one or more tokens)
     while idx < len(tokens) and WEATHER_TOKEN_RE.match(tokens[idx]):
         desc = decode_weather_token(tokens[idx])
         if desc:
             result['weather'].append(desc)
         idx += 1
 
-    # Sky conditions
+    # Sky conditions (one layer per token, e.g. FEW018, BKN045CB)
     while idx < len(tokens):
         m = SKY_TOKEN_RE.match(tokens[idx])
         if not m:
@@ -208,7 +256,7 @@ def parse_metar(raw):
         label, rank = SKY_COVERAGE.get(coverage, (coverage, 0))
         layer = {'coverage': label, 'rank': rank}
         if height_code:
-            layer['height_ft'] = int(height_code) * 100
+            layer['height_ft'] = int(height_code) * 100  # hundreds of feet
         if cloud_type == 'CB':
             layer['note'] = 'cumulonimbus (thunderstorm cloud)'
         elif cloud_type == 'TCU':
@@ -216,7 +264,7 @@ def parse_metar(raw):
         result['sky_layers'].append(layer)
         idx += 1
 
-    # Temperature / dewpoint
+    # Temperature / dewpoint (e.g. 18/07, M02/M05)
     if idx < len(tokens) and re.match(r'^M?\d+/M?\d*$', tokens[idx]):
         parts = tokens[idx].split('/')
         tc = int(parts[0].replace('M', '-'))
@@ -228,7 +276,7 @@ def parse_metar(raw):
             result['dewpoint_f'] = c_to_f(dc)
         idx += 1
 
-    # Altimeter
+    # Altimeter — A = inches of mercury (US), Q = hectopascals (international)
     if idx < len(tokens):
         m = re.match(r'^A(\d{4})$', tokens[idx])
         if m:
@@ -241,7 +289,7 @@ def parse_metar(raw):
                 result['altimeter'] = f"{hpa} hPa ({hpa * 0.02953:.2f} inHg)"
                 idx += 1
 
-    # Derive sky summary and icon
+    # Derive sky summary and choose an icon based on the worst sky layer
     max_rank = max((l['rank'] for l in result['sky_layers']), default=0)
     has_thunder = any('thunderstorm' in w for w in result['weather'])
     has_rain = any(w for w in result['weather'] if any(x in w for x in ('rain', 'drizzle', 'showers')))
@@ -257,7 +305,7 @@ def parse_metar(raw):
     else:
         result['sky_summary'] = 'Not reported'
 
-    # Friendly overall description
+    # Map temperature to a qualitative feel descriptor
     tc = result['temperature_c']
     if tc is not None:
         if tc <= 0:
@@ -275,6 +323,7 @@ def parse_metar(raw):
     else:
         temp_feel = ''
 
+    # Priority order: thunder > snow > rain > fog > cloud cover > clear
     condition_parts = []
     if has_thunder:
         condition_parts.append('thunderstorms')
@@ -316,6 +365,7 @@ def parse_metar(raw):
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
+    """Render the main page and handle METAR lookup form submissions."""
     weather = None
     error = None
     airport_code = ''
